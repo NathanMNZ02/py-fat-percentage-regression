@@ -1,83 +1,96 @@
+# Muscle Gain Analyzer — Stima della percentuale di massa grassa
 
+Progetto di analisi statistica e machine learning per stimare la **percentuale di massa
+grassa (Body Fat %)** di un individuo a partire da dati antropometrici, demografici e
+alimentari, utilizzando come gold standard le misurazioni **DEXA** del dataset pubblico
+**NHANES**.
 
-Obiettivo del progetto ML (predecessore dell’AI agente)
-	•	Input: dati antropometrici (peso, altezza, BMI, massa magra, percentuale grasso, età, genere…) + preferenze alimentari e di allenamento
-	•	Output: piano alimentare e allenamento per tot mesi
-	•	Comportamento desiderato: quando richiede un nuovo piano, l’algoritmo ragiona sui piani precedenti per adattarsi al soggetto
+L'obiettivo è costruire un modello di regressione che superi le formule cliniche
+tradizionali (Deurenberg, U.S. Navy, CUN-BAE) includendo informazioni che queste
+trascurano, come la distribuzione del grasso (circonferenze vita/fianchi), l'etnia e i
+macronutrienti assunti.
 
-⸻
+## Contesto
 
-Come collegarlo al tuo corso di ML
-	1.	Regressione multipla / polinomiale
-	•	Modella la risposta individuale a dieta e allenamento
-	•	Esempio: prevede incremento massa magra (lean_mass_kg) dati i macro e l’attività fisica prevista
-	•	Puoi gestire interazioni tra variabili, e introdurre non linearità (ad es. risposta a proteine o allenamento in modo polinomiale)
-	2.	Design of Experiments (DoE) e ANOVA
-	•	Puoi simulare diversi piani combinando fattori:
-	•	Esempio: tipo di allenamento (forza/cardio) × dieta (alta/bassa proteine)
-	•	ANOVA a due vie per vedere quali combinazioni massimizzano il progresso
-	•	Così dimostri competenze di progettazione sperimentale
-	3.	Test chi-quadro
-	•	Trasforma outcome in categorie (es. gain_high / gain_low)
-	•	Verifica associazioni tra tipo di dieta o allenamento e successo → test di adattamento e tabelle di contingenza
-	4.	Test avanzati (curve OC, Fisher-Irwin)
-	•	Valuti la potenza dei test sulle decisioni di piani alimentari
-	•	Puoi simulare vari scenari: “Se cambio macro di 5g, quanto aumenta la probabilità di successo?”
-	5.	Simulazione Monte Carlo
-	•	Molto utile per il futuro agente AI:
-	•	Simula risultati futuri di piani diversi
-	•	Costruisci una distribuzione di outcome attesi per ogni utente
+Il solo **BMI** non è un indicatore affidabile dello stato di salute: esistono soggetti
+normopeso ma con percentuale di massa grassa elevata (fenomeno *skinny fat* / *obesità
+normopeso*). Misurare direttamente la massa grassa richiede strumenti costosi (DEXA,
+pesata idrostatica, plicometria), per cui in letteratura si usano formule di stima a
+partire da parametri facilmente misurabili. Questo progetto parte da quelle formule e ne
+propone una alternativa basata sui dati.
 
-⸻
+## Dataset
 
-Come strutturare il progetto attuale (predecessore)
+I dati provengono da **NHANES (National Health and Nutrition Examination Survey)** in
+formato `.XPT` (SAS):
 
-Step 1: Dataset
-	•	Costruisci dataset sintetico o usa dataset longitudinali reali
-	•	Include:
-	•	user_id
-	•	dati antropometrici (peso, BMI, massa magra…)
-	•	macro giornalieri
-	•	tipo e volume di allenamento
-	•	risultato osservato dopo periodo (es. variazione lean_mass_kg)
+| File | Contenuto |
+|------|-----------|
+| `DXX_J.xpt` | Misurazione DEXA della massa grassa totale (`DXDTOPF`) — la variabile target |
+| `BMX_J.XPT` | Dati antropometrici (peso, altezza, BMI, circonferenze braccio/vita/fianchi, lunghezze arti) |
+| `DEMO_J.XPT` | Dati demografici (genere, età, etnia, stato di gravidanza) |
+| `DR1TOT_J.XPT` | Recall alimentare 24h (kcal, proteine, carboidrati, grassi) |
 
-Step 2: Modello ML
-	•	Obiettivo: predire l’outcome del piano (incremento massa magra / composizione corporea)
-	•	Algoritmi possibili:
-	•	Regressione multipla/polinomiale
-	•	Modelli ensemble (Random Forest) per fare feature importance
-	•	Possibilità futura: modello sequenziale (RNN / LSTM) per piani multipli nel tempo
+I dataset vengono uniti sul codice soggetto `SEQN` e filtrati per mantenere solo le
+misurazioni valide e complete (DEXA valida, antropometria completa, esame fisico
+effettuato, esclusione delle donne in gravidanza, recall alimentare affidabile).
 
-Step 3: Analisi statistica
-	•	Usa ANOVA per capire interazioni tra fattori
-	•	Test chi-quadro per decisioni categoriche (piani efficaci o no)
-	•	Monte Carlo per simulare nuovi piani e risultati attesi
+> I file `.XPT` attesi dal notebook si trovano in `src/db/`.
 
-⸻
+## Pipeline di analisi
 
-Step 4: Output “precursore AI”
-	•	Genera un piano consigliato (macro + workout) per tot settimane
-	•	Quando richiedi nuovo piano:
-	•	confronta con piano precedente
-	•	valuta outcome osservati
-	•	aggiorna suggerimenti
+L'intero studio è contenuto nel notebook [src/fat_percentage_regression.ipynb](src/fat_percentage_regression.ipynb)
+ed è strutturato come segue:
 
-💡 Questo è un proof-of-concept del comportamento adattivo dell’agente AI futuro.
+1. **Formule classiche** — implementazione di Deurenberg (1991), U.S. Navy e CUN-BAE come baseline di confronto.
+2. **Costruzione del dataset** — merge dei file NHANES, filtraggio dei soggetti, gestione dei valori nulli.
+3. **Outlier e valori anomali** — cross-check fra misurazioni indipendenti (DXA vs CUN-BAE) e filtraggio per percentili.
+4. **Test statistici** — Chi-quadro per verificare l'associazione fra fascia di massa grassa ed etnia/sesso, a giustificazione dell'inclusione di queste variabili.
+5. **Selezione delle variabili** — analisi della multicollinearità (matrice di correlazione) e selezione automatica tramite **ElasticNet**.
+6. **Modello** — regressione lineare multipla (OLS), poi estensione **polinomiale** con termini di interazione.
+7. **Confronto** — valutazione dell'$R^2$ sul test set contro le formule classiche, con miglioramento netto.
+8. **Diagnostica** — Predetto vs Reale, Residui vs Predetto e Q-Q plot dei residui per validare le assunzioni di OLS.
+9. **Inferenza** — funzione `predict_bf` che incapsula l'intera pipeline e stima la massa grassa di nuovi soggetti.
 
-⸻
+Il modello addestrato viene serializzato in [src/fat_percentage_model.joblib](src/fat_percentage_model.joblib).
 
-Perché è perfetto per il progetto universitario
-	•	Copre tutti gli argomenti del corso (regressione, ANOVA, test, Monte Carlo)
-	•	Ha un’applicazione pratica reale → fitness e nutrizione
-	•	Può essere poi esteso in futuro a vero agente AI con apprendimento sequenziale e personalizzazione continua
+## Note teoriche
 
-⸻
+La cartella [note/](note/) contiene i notebook didattici sui metodi statistici usati nel progetto:
 
-Se vuoi, posso proporti un esempio concreto di progetto con:
-	1.	quali variabili usare
-	2.	come costruire dataset sintetico per simulare più utenti e piani
-	3.	pipeline di regressione + ANOVA + simulazione Monte Carlo
+- Design of Experiments
+- Regressione lineare, multipla, polinomiale e pesata
+- ANOVA
+- Test del Chi-quadro
 
-Così avresti subito un prototipo pronto da sviluppare e documentare.
+## Requisiti e avvio
 
-Vuoi che faccia questo passo?
+Il progetto usa Python con Jupyter. Le dipendenze principali sono `pandas`, `numpy`,
+`scikit-learn`, `statsmodels`, `scipy`, `matplotlib`, `seaborn` e `joblib`.
+
+```bash
+# Crea un ambiente virtuale (consigliato)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Installa le dipendenze
+pip install -r requirements.txt
+
+# Avvia Jupyter e apri il notebook
+jupyter notebook src/fat_percentage_regression.ipynb
+```
+
+## Struttura del progetto
+
+```
+.
+├── db/
+│   └── health_fitness_dataset.csv       # dataset fitness ausiliario
+├── note/                                # notebook teorici sui metodi statistici
+├── src/
+│   ├── db/                              # file NHANES (.XPT)
+│   ├── fat_percentage_regression.ipynb  # analisi e modello principale
+│   └── fat_percentage_model.joblib      # modello serializzato
+├── requirements.txt
+└── README.md
+```
